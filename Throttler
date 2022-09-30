@@ -1,86 +1,82 @@
-     public class Throttler : IDisposable
-     {
-         private readonly int _maxActionsPerSecond;
-         private readonly SemaphoreSlim _lock;
-         private DateTime _actionTime;
-         private CancellationTokenSource _cancellationSource;
-         private bool disposedValue;
- 
-         public Throttler(int maxActionsPerSecond)
-         {
-             _maxActionsPerSecond = maxActionsPerSecond;
-             _lock = new SemaphoreSlim(maxActionsPerSecond, maxActionsPerSecond);
-             _actionTime = GetTime();
-             _cancellationSource = new CancellationTokenSource();
-             SetTimeWorker();
-         }
- 
-         public void Do(Action action)
-         {
-             _lock.Wait();
-             action();
-         }
- 
-         public async Task<T> DoAsync<T>(Func<Task<T>> action)
-         {
-             await _lock.WaitAsync();
-             return await action();
-         }
- 
-         private void SetTimeWorker()
-         {
-             var worker = new Thread(() =>
-             {
-                 var token = _cancellationSource.Token;
- 
-                 while (!token.IsCancellationRequested)
-                 {
-                     var currentTime = GetTime();
- 
-                     if (_actionTime != currentTime)
-                     {
-                         _actionTime = currentTime;
- 
-                         var loopCount = _maxActionsPerSecond - _lock.CurrentCount;
-                         if (loopCount > 0)
-                             _lock.Release(loopCount);
- 
-                         Thread.Sleep(1000);
-                     }
-                     else
-                     {
-                         Thread.Sleep(100);
-                     }
- 
-                     
-                 }
-             });
- 
-             worker.IsBackground = true;
-             worker.Start();
-         }
- 
-         private DateTime GetTime() => DateTime.Parse(DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss"));
- 
- 
-         protected virtual void Dispose(bool disposing)
-         {
-             if (!disposedValue)
-             {
-                 if (disposing)
-                 {
-                 }
- 
-                 _cancellationSource.Cancel();
- 
-                 disposedValue = true;
-             }
-         }
- 
-         public void Dispose()
-         {
-             // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' method
-             Dispose(disposing: true);
-             GC.SuppressFinalize(this);
-         }
-     }
+public class Throttler : IDisposable
+{
+    private readonly int _maxActionsPerInterval;
+    private readonly TimeSpan _interval;
+    private readonly SemaphoreSlim _lock;
+    private CancellationTokenSource _cancellationSource;
+    private bool disposedValue;
+
+    public Throttler(int maxActionsPerInterval, TimeSpan interval)
+    {
+        _maxActionsPerInterval = maxActionsPerInterval;
+        _interval = interval;
+        _lock = new SemaphoreSlim(maxActionsPerInterval, maxActionsPerInterval);
+        _cancellationSource = new CancellationTokenSource();
+        SetTimeWorker();
+    }
+
+    public void Do(Action action)
+    {
+        _lock.Wait();
+        action();
+    }
+
+    public T Do<T>(Func<T> action)
+    {
+        _lock.Wait();
+        return action();
+    }
+
+    public async Task DoAsync(Func<Task> action)
+    {
+        await _lock.WaitAsync();
+        await action();
+    }
+
+    public async Task<T> DoAsync<T>(Func<Task<T>> action)
+    {
+        await _lock.WaitAsync();
+        return await action();
+    }
+
+    private void SetTimeWorker()
+    {
+        var worker = new Thread(() =>
+        {
+            var token = _cancellationSource.Token;
+
+            while (!token.IsCancellationRequested)
+            {
+                Thread.Sleep(_interval);
+
+                var loopCount = _maxActionsPerInterval - _lock.CurrentCount;
+                if (loopCount > 0)
+                    _lock.Release(loopCount);
+            }
+        });
+
+        worker.IsBackground = true;
+        worker.Start();
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (!disposedValue)
+        {
+            if (disposing)
+            {
+            }
+
+            _cancellationSource.Cancel();
+
+            disposedValue = true;
+        }
+    }
+
+    public void Dispose()
+    {
+        // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' method
+        Dispose(disposing: true);
+        GC.SuppressFinalize(this);
+    }
+}
